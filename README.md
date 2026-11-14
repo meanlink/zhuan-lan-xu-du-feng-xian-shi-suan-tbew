@@ -35,6 +35,7 @@ Role 枚举：admin/analyst/viewer；JobStatus：queued/running/completed/failed
 COMPOSE_PROJECT_NAME=reader-risk；FRONTEND_PORT=18207；BACKEND_PORT=19207；DB_PORT=17707；DB_PASSWORD、JWT_SECRET 见 .env.example；SEED_DEMO 默认 true。共享命名产物卷供后端下载与 worker 写入，数据库/Redis 各持久卷。
 恰好五服务均有健康检查。Redis 队列加 SQL 排队状态兜底；worker 按 next_run 生成本地收件箱文件。周期 60 秒至 30 天。分发结果为批准分析的固定快照；若需新数据重新计算并建立新计划。当前不连接邮件或企业聊天。
 错误响应、请求编号、Redis 每 IP 每分钟 240 次限流、JWT 和数据库操作审计。演示密钥与密码仅供本机模拟；生产部署前配置独立密钥与账号。
+定时归档按期建档：worker 按计划应发时刻补齐漏期（重启不丢期），(report_id, 应发时刻) 唯一约束保证同一期重试与多进程领取都不新增归档；每期在首次领取时固定试验结果快照，暂停后不再领取新期、已领取的仍可恢复完成。文件经临时文件原子落盘，中断不留空记录；中断期次自动恢复原期。文件与 SHA256 齐全才可下载，缺文件或校验不符标记待修复，可从该期快照修复且不另增归档；分发页可核对每期应发时间、处理状态与恢复结果。
 
 ## 数据与验收
 所有数据为固定随机种子生成的模拟业务数据，不能作为实际生产决策证据。项目独立算法、输入边界及业务局限详见 BUSINESS.md。测试与截图统一存放 ../../test-artifacts/gb-1008/，源码不含日志/截图/测试报告。

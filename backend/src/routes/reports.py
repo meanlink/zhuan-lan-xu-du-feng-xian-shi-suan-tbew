@@ -26,13 +26,33 @@ def toggle(id:int,db=Depends(get_db),u=Depends(admin_only)):
     return report_dict(r)
 @router.get('/deliveries')
 def deliveries(db=Depends(get_db),u=Depends(current_user)):
-    return [delivery_dict(d) for d in db.scalars(select(Delivery).order_by(Delivery.id.desc()).limit(100))]
+    rows=list(db.scalars(select(Delivery).order_by(Delivery.scheduled_for.desc(),Delivery.id.desc()).limit(100)))
+    changed=False
+    for d in rows: changed=reports.verify(db,d) or changed
+    if changed: db.commit()
+    names={r.id:r.name for r in db.scalars(select(Report))}
+    return [delivery_dict(d,names.get(d.report_id,'')) for d in rows]
+@router.post('/deliveries/{id}/retry')
+def retry(id:int,db=Depends(get_db),u=Depends(admin_only)):
+    d=db.get(Delivery,id)
+    if not d:raise HTTPException(404,'归档期次不存在')
+    reports.retry(db,d); record(db,u.email,'delivery.retry',{'id':id}); db.commit()
+    return delivery_dict(d)
+@router.post('/deliveries/{id}/repair')
+def repair(id:int,db=Depends(get_db),u=Depends(admin_only)):
+    d=db.get(Delivery,id)
+    if not d:raise HTTPException(404,'归档期次不存在')
+    reports.repair(db,d); record(db,u.email,'delivery.repaired',{'id':id}); db.commit()
+    return delivery_dict(d)
 @router.get('/deliveries/{id}/download')
 def download(id:int,format:str='csv',db=Depends(get_db),u=Depends(current_user)):
     d=db.get(Delivery,id)
     if not d:raise HTTPException(404,'归档不存在')
     if format not in ('csv','json'):raise HTTPException(422,'支持 CSV 或 JSON')
+    if d.status=='repair':raise HTTPException(409,'归档文件缺失或校验不符，待修复后可下载')
+    if d.status!='completed':raise HTTPException(409,'该期尚未归档完成，暂不可下载')
+    if not reports.integrity_ok(d):
+        d.status='repair'; record(db,'system','delivery.repair_marked',{'id':d.id}); db.commit()
+        raise HTTPException(409,'归档文件缺失或校验不符，已标记为待修复')
     filename=d.filename+('.json' if format=='json' else '')
-    p=os.path.join(ARTIFACT_DIR,filename)
-    if not os.path.exists(p):raise HTTPException(404,'归档文件不存在，请重新安排分发')
-    return FileResponse(p,filename=filename,media_type='application/json' if format=='json' else 'text/csv; charset=utf-8')
+    return FileResponse(os.path.join(ARTIFACT_DIR,filename),filename=filename,media_type='application/json' if format=='json' else 'text/csv; charset=utf-8')

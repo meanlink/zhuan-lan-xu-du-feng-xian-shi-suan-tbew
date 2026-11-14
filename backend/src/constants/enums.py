@@ -8,3 +8,9 @@ class JobStatus(str, Enum):
     running = 'running'
     completed = 'completed'
     failed = 'failed'
+class DeliveryStatus(str, Enum):
+    pending = 'pending'      # 待领取
+    claimed = 'claimed'      # 处理中
+    completed = 'completed'  # 已归档
+    repair = 'repair'        # 待修复
+    failed = 'failed'        # 待重试

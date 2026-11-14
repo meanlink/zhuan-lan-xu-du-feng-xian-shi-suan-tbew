@@ -6,6 +6,6 @@ export async function api(path,options={}){
 }
 export async function download(id,format){
  const r=await fetch('/api/deliveries/'+id+'/download?format='+format,{headers:{Authorization:'Bearer '+session.token}});
- if(!r.ok)throw new Error('下载失败，请重试');
+ if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(typeof d.detail==='string'?d.detail:'下载失败，请重试');}
  const u=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=u;a.download='分析归档-'+id+'.'+format;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
 }

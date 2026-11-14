@@ -1,14 +1,15 @@
-import time, json, logging
+import time, json, logging, os, socket
 from pathlib import Path
 from sqlalchemy import select
 from redis import Redis
 from src.config.database import Session
 from src.config.settings import REDIS_URL
-from src.models import Job, Dataset, Report
+from src.models import Job, Dataset
 from src.services.business import analyze
-from src.services.reports import deliver
+from src.services import reports
 from src.services.audit import record
 logging.basicConfig(level=logging.INFO)
+WORKER_ID=f'{socket.gethostname()}:{os.getpid()}'
 def execute(job_id):
     with Session() as db:
         j=db.get(Job,job_id)
@@ -29,11 +30,11 @@ def tick():
     with Session() as db:
         queued=list(db.scalars(select(Job.id).where(Job.status=='queued').limit(3)))
     for job_id in queued:execute(job_id)
+    now=time.time()
     with Session() as db:
-        for r in db.scalars(select(Report).where(Report.enabled==True,Report.next_run<=time.time())):
-            d=deliver(db,r)
-            if d:record(db,'worker','report.delivered',{'id':r.id,'delivery':d.id})
-        db.commit()
+        reports.backfill(db,now)            # 按计划应发时刻补齐漏期
+        reports.recover_stale(db,WORKER_ID,now)  # 恢复中断的原期（含已暂停计划的已领取期）
+        reports.claim_due(db,WORKER_ID,now)      # 原子领取新期，多进程不重复
 def main():
     r=Redis.from_url(REDIS_URL,socket_timeout=3)
     # This Compose stack has a single worker. A crash must not strand its jobs.
@@ -41,6 +42,8 @@ def main():
         for j in db.scalars(select(Job).where(Job.status=='running')):
             j.status='queued';record(db,'worker','job.recovered',{'id':j.id})
         db.commit()
+        # 中断时处于处理中的期次立即恢复原期：同一行、同一快照，不新增归档
+        reports.recover_stale(db,WORKER_ID,time.time(),grace=0)
     while True:
         Path('/tmp/heartbeat').touch()
         try:
